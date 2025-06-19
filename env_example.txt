@@ -1,0 +1,16 @@
+# Copy this file to .env and fill in your actual values
+
+# OpenAI API Key (required for DALL-E, optional if using Replicate)
+# Get this from https://platform.openai.com/api-keys
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Replicate API Token (recommended for better face generation)
+# Get this from https://replicate.com/account/api-tokens
+
+
+# Azure Storage Connection String (optional - if not provided, local storage will be used)
+# Get this from your Azure Storage Account
+# AZURE_STORAGE_CONNECTION_STRING=your_azure_storage_connection_string_here
+
+# Azure Container Name (optional, defaults to 'babymaker-images')
+# AZURE_CONTAINER_NAME=babymaker-images 
