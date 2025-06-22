@@ -14,7 +14,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: read #This is required for actions/checkout
 
     steps:
       - uses: actions/checkout@v4
@@ -28,51 +28,40 @@ jobs:
         run: |
           python -m venv venv
           source venv/bin/activate
-          echo "$VIRTUAL_ENV/bin" >> $GITHUB_PATH
       
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
-      - name: Prepare deployment package
-        run: |
-          # Create a temporary directory for deployment
-          mkdir -p /tmp/deployment
-          # Copy all files except excluded ones
-          rsync -av --exclude='.git' --exclude='.github' --exclude='venv' --exclude='__pycache__' --exclude='.pytest_cache' --exclude='.env.example' --exclude='deployment' . /tmp/deployment/
-          # Clean up any remaining Python cache files
-          find /tmp/deployment -name "*.pyc" -delete
-          find /tmp/deployment -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-          # Move to our workspace
-          mv /tmp/deployment ./deployment
+      - name: Zip artifact for deployment
+        run: zip release.zip ./* -r
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: deployment/
-          retention-days: 1
+          path: |
+            release.zip
+            !venv/
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
     permissions:
-      id-token: write
-      contents: read
-    environment:
-      name: 'Production'
-      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+      id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
 
     steps:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
           name: python-app
-          path: ./app
 
+      - name: Unzip artifact for deployment
+        run: unzip release.zip
+
+      
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -86,12 +75,4 @@ jobs:
         with:
           app-name: 'babymaker-app-1750608342'
           slot-name: 'Production'
-          package: './app'
-          startup-command: 'python -m streamlit run app.py --server.port 8000 --server.address 0.0.0.0'
-        
-      - name: Verify deployment
-        run: |
-          echo "Deployment completed. Waiting for app to start..."
-          sleep 30
-          curl -f https://babymaker-app-1750608342.azurewebsites.net/ || echo "App may still be starting up"
           
