@@ -7,12 +7,34 @@ import io
 from PIL import Image
 import os
 from datetime import datetime
+from typing import Optional
 
 # Import our services
 from src.services.replicate_service import replicate_service
+from src.services.azure_blob_service import azure_blob_service
+
+def save_uploaded_file_to_azure(uploaded_file) -> Optional[str]:
+    """Save uploaded file to Azure Blob Storage and return blob URL"""
+    try:
+        # Convert uploaded file to bytes
+        file_bytes = uploaded_file.getbuffer()
+        
+        # Upload to Azure and get blob URL
+        blob_url = azure_blob_service.upload_parent_photo(file_bytes)
+        
+        if blob_url:
+            return blob_url
+        else:
+            # Fallback to local storage
+            return save_uploaded_file(uploaded_file)
+            
+    except Exception as e:
+        st.error(f"Error uploading to Azure: {e}")
+        # Fallback to local storage
+        return save_uploaded_file(uploaded_file)
 
 def save_uploaded_file(uploaded_file, folder="temp_uploads"):
-    """Save uploaded file temporarily and return path"""
+    """Save uploaded file locally (fallback method)"""
     if not os.path.exists(folder):
         os.makedirs(folder)
     
@@ -21,8 +43,33 @@ def save_uploaded_file(uploaded_file, folder="temp_uploads"):
         f.write(uploaded_file.getbuffer())
     return file_path
 
+def save_generated_image_to_azure(image_url: str, image_type: str) -> Optional[str]:
+    """Save generated image to Azure Blob Storage"""
+    try:
+        if image_type == "baby":
+            azure_url = azure_blob_service.save_generated_baby(image_url)
+        elif image_type == "family":
+            azure_url = azure_blob_service.save_generated_family(image_url)
+        else:
+            return None
+            
+        if azure_url:
+            return azure_url
+        else:
+            # Fallback to local storage
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{image_type}_{timestamp}.png"
+            return save_generated_image(image_url, filename)
+            
+    except Exception as e:
+        st.error(f"Error saving to Azure: {e}")
+        # Fallback to local storage
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{image_type}_{timestamp}.png"
+        return save_generated_image(image_url, filename)
+
 def save_generated_image(image_url, filename, folder="generated_images"):
-    """Download and save generated image locally"""
+    """Download and save generated image locally (fallback method)"""
     import requests
     
     if not os.path.exists(folder):
@@ -38,6 +85,32 @@ def save_generated_image(image_url, filename, folder="generated_images"):
         return file_path
     except Exception as e:
         st.error(f"Error saving image: {e}")
+        return None
+
+def download_image_from_url(url: str, filename: str) -> Optional[bytes]:
+    """Download image from URL for Streamlit download"""
+    try:
+        import requests
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.content
+    except Exception as e:
+        st.error(f"Error downloading image: {e}")
+        return None
+
+def get_download_data(image_path_or_url: str, filename: str) -> Optional[bytes]:
+    """Get download data from either local file or URL"""
+    if image_path_or_url.startswith('http'):
+        # It's a URL (Azure blob)
+        return download_image_from_url(image_path_or_url, filename)
+    else:
+        # It's a local file path
+        try:
+            if os.path.exists(image_path_or_url):
+                with open(image_path_or_url, "rb") as file:
+                    return file.read()
+        except Exception as e:
+            st.error(f"Error reading local file: {e}")
         return None
 
 def main_page():
@@ -67,6 +140,18 @@ def main_page():
             st.success("✅ Replicate AI Ready!")
         else:
             st.error("❌ Replicate not configured. Please set REPLICATE_API_TOKEN in your .env file.")
+        
+        # Test Azure storage
+        azure_info = azure_blob_service.get_storage_info()
+        if azure_info["status"] == "available":
+            st.success("✅ Azure Storage Ready!")
+            st.caption(f"Account: {azure_info.get('account_kind', 'Unknown')}")
+        elif azure_info["status"] == "unavailable":
+            st.warning("⚠️ Azure Storage not configured - using local storage")
+            st.caption("Set AZURE_STORAGE_CONNECTION_STRING for cloud storage")
+        else:
+            st.error(f"❌ Azure Storage error: {azure_info.get('error', 'Unknown')}")
+            st.caption("Falling back to local storage")
         
         st.header("⚙️ Generation Settings")
         
@@ -244,8 +329,8 @@ def main_page():
                 
                 try:
                     # Save uploaded files temporarily
-                    parent1_path = save_uploaded_file(parent1_file)
-                    parent2_path = save_uploaded_file(parent2_file)
+                    parent1_path = save_uploaded_file_to_azure(parent1_file)
+                    parent2_path = save_uploaded_file_to_azure(parent2_file)
                     
                     # Step 1: Generate Baby
                     status_text.text("🎨 Step 1/2: Creating your baby... (10-15 seconds)")
@@ -309,7 +394,7 @@ def main_page():
                     baby_paths = []
                     for i, url in enumerate(baby_urls):
                         baby_filename = f"baby_{timestamp}_{i+1}.png" if len(baby_urls) > 1 else f"baby_{timestamp}.png"
-                        baby_path = save_generated_image(url, baby_filename)
+                        baby_path = save_generated_image_to_azure(url, "baby")
                         baby_paths.append((url, baby_path, baby_filename))
                     
                     # Store in session state
@@ -351,7 +436,7 @@ def main_page():
                             
                         # Save family image
                         family_filename = f"family_{timestamp}.png"
-                        family_path = save_generated_image(family_url, family_filename)
+                        family_path = save_generated_image_to_azure(family_url, "family")
                         
                         # Store in session state
                         st.session_state.family_url = family_url
@@ -373,30 +458,30 @@ def main_page():
                                 
                                 # Download button for baby
                                 _, baby_path, baby_filename = baby_paths[0]
-                                if baby_path and os.path.exists(baby_path):
-                                    with open(baby_path, "rb") as file:
-                                        st.download_button(
-                                            label="📥 Download Baby Photo",
-                                            data=file.read(),
-                                            file_name=baby_filename,
-                                            mime="image/png",
-                                            key="download_baby"
-                                        )
+                                download_data = get_download_data(baby_path, baby_filename)
+                                if download_data:
+                                    st.download_button(
+                                        label="📥 Download Baby Photo",
+                                        data=download_data,
+                                        file_name=baby_filename,
+                                        mime="image/png",
+                                        key="download_baby"
+                                    )
                             
                             with col2:
                                 st.subheader("👨‍👩‍👧‍👦 Family Portrait")
                                 st.image(family_url, use_column_width=True)
                                 
                                 # Download button for family
-                                if family_path and os.path.exists(family_path):
-                                    with open(family_path, "rb") as file:
-                                        st.download_button(
-                                            label="📥 Download Family Portrait",
-                                            data=file.read(),
-                                            file_name=family_filename,
-                                            mime="image/png",
-                                            key="download_family"
-                                        )
+                                download_data = get_download_data(family_path, family_filename)
+                                if download_data:
+                                    st.download_button(
+                                        label="📥 Download Family Portrait",
+                                        data=download_data,
+                                        file_name=family_filename,
+                                        mime="image/png",
+                                        key="download_family"
+                                    )
                         else:
                             # Multiple baby variations + family portrait
                             st.subheader("👶 Your AI Baby Variations")
@@ -404,29 +489,29 @@ def main_page():
                             for i, (url, (_, baby_path, baby_filename)) in enumerate(zip(baby_urls, baby_paths)):
                                 with cols[i]:
                                     st.image(url, caption=f"Baby #{i+1}", use_column_width=True)
-                                    if baby_path and os.path.exists(baby_path):
-                                        with open(baby_path, "rb") as file:
-                                            st.download_button(
-                                                label=f"📥 Download #{i+1}",
-                                                data=file.read(),
-                                                file_name=baby_filename,
-                                                mime="image/png",
-                                                key=f"download_baby_{i}"
-                                            )
+                                    download_data = get_download_data(baby_path, baby_filename)
+                                    if download_data:
+                                        st.download_button(
+                                            label=f"📥 Download #{i+1}",
+                                            data=download_data,
+                                            file_name=baby_filename,
+                                            mime="image/png",
+                                            key=f"download_baby_{i}"
+                                        )
                             
                             st.subheader("👨‍👩‍👧‍👦 Family Portrait")
                             st.image(family_url, use_column_width=True)
                             
                             # Download button for family
-                            if family_path and os.path.exists(family_path):
-                                with open(family_path, "rb") as file:
-                                    st.download_button(
-                                        label="📥 Download Family Portrait",
-                                        data=file.read(),
-                                        file_name=family_filename,
-                                        mime="image/png",
-                                        key="download_family"
-                                    )
+                            download_data = get_download_data(family_path, family_filename)
+                            if download_data:
+                                st.download_button(
+                                    label="📥 Download Family Portrait",
+                                    data=download_data,
+                                    file_name=family_filename,
+                                    mime="image/png",
+                                    key="download_family"
+                                )
                     else:
                         st.error("❌ Failed to generate family portrait, but baby was created successfully!")
                         # Still show the baby(ies)
@@ -440,10 +525,12 @@ def main_page():
                                 with cols[i]:
                                     st.image(url, caption=f"Baby #{i+1}", use_column_width=True)
                     
-                    # Clean up temp files
+                    # Clean up temp files (only if they're local paths)
                     try:
-                        os.remove(parent1_path)
-                        os.remove(parent2_path)
+                        if not parent1_path.startswith('http'):
+                            os.remove(parent1_path)
+                        if not parent2_path.startswith('http'):
+                            os.remove(parent2_path)
                     except:
                         pass
                         

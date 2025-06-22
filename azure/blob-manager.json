@@ -1,0 +1,157 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "description": "Blob Manager for Baby Maker 5000 - Manages access policies, lifecycle, and security"
+    },
+    "parameters": {
+        "storageAccountName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the existing storage account"
+            }
+        },
+        "enableLifecycleManagement": {
+            "type": "bool",
+            "defaultValue": true,
+            "metadata": {
+                "description": "Enable lifecycle management to auto-delete old files"
+            }
+        },
+        "tempFilesRetentionDays": {
+            "type": "int",
+            "defaultValue": 1,
+            "metadata": {
+                "description": "Days to keep temporary uploaded files"
+            }
+        },
+        "generatedFilesRetentionDays": {
+            "type": "int",
+            "defaultValue": 30,
+            "metadata": {
+                "description": "Days to keep generated images"
+            }
+        }
+    },
+    "variables": {
+        "storageAccountName": "[toLower(parameters('storageAccountName'))]",
+        "containerNames": [
+            "parent-photos",
+            "generated-babies", 
+            "generated-families",
+            "temp-uploads"
+        ]
+    },
+    "resources": [
+        {
+            "condition": "[parameters('enableLifecycleManagement')]",
+            "type": "Microsoft.Storage/storageAccounts/managementPolicies",
+            "apiVersion": "2023-01-01",
+            "name": "[concat(variables('storageAccountName'), '/default')]",
+            "properties": {
+                "policy": {
+                    "rules": [
+                        {
+                            "enabled": true,
+                            "name": "DeleteTempUploads",
+                            "type": "Lifecycle",
+                            "definition": {
+                                "filters": {
+                                    "blobTypes": [
+                                        "blockBlob"
+                                    ],
+                                    "prefixMatch": [
+                                        "temp-uploads/"
+                                    ]
+                                },
+                                "actions": {
+                                    "baseBlob": {
+                                        "delete": {
+                                            "daysAfterModificationGreaterThan": "[parameters('tempFilesRetentionDays')]"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "enabled": true,
+                            "name": "ArchiveOldGeneratedImages",
+                            "type": "Lifecycle",
+                            "definition": {
+                                "filters": {
+                                    "blobTypes": [
+                                        "blockBlob"
+                                    ],
+                                    "prefixMatch": [
+                                        "generated-babies/",
+                                        "generated-families/"
+                                    ]
+                                },
+                                "actions": {
+                                    "baseBlob": {
+                                        "tierToCool": {
+                                            "daysAfterModificationGreaterThan": 7
+                                        },
+                                        "tierToArchive": {
+                                            "daysAfterModificationGreaterThan": "[parameters('generatedFilesRetentionDays')]"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "enabled": true,
+                            "name": "DeleteOldParentPhotos",
+                            "type": "Lifecycle",
+                            "definition": {
+                                "filters": {
+                                    "blobTypes": [
+                                        "blockBlob"
+                                    ],
+                                    "prefixMatch": [
+                                        "parent-photos/"
+                                    ]
+                                },
+                                "actions": {
+                                    "baseBlob": {
+                                        "delete": {
+                                            "daysAfterModificationGreaterThan": 7
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "outputs": {
+        "storageAccountName": {
+            "type": "string",
+            "value": "[variables('storageAccountName')]"
+        },
+        "blobEndpoints": {
+            "type": "object",
+            "value": {
+                "baseUrl": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').primaryEndpoints.blob]",
+                "parentPhotos": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').primaryEndpoints.blob, 'parent-photos/')]",
+                "generatedBabies": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').primaryEndpoints.blob, 'generated-babies/')]",
+                "generatedFamilies": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').primaryEndpoints.blob, 'generated-families/')]",
+                "tempUploads": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').primaryEndpoints.blob, 'temp-uploads/')]"
+            }
+        },
+        "lifecyclePolicyEnabled": {
+            "type": "bool",
+            "value": "[parameters('enableLifecycleManagement')]"
+        },
+        "retentionSettings": {
+            "type": "object",
+            "value": {
+                "tempFilesRetentionDays": "[parameters('tempFilesRetentionDays')]",
+                "generatedFilesRetentionDays": "[parameters('generatedFilesRetentionDays')]",
+                "parentPhotosRetentionDays": 7
+            }
+        }
+    }
+} 

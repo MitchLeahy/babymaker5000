@@ -1,0 +1,213 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "description": "Azure Blob Storage for Baby Maker 5000 - Stores parent photos and generated images"
+    },
+    "parameters": {
+        "storageAccountName": {
+            "type": "string",
+            "defaultValue": "[concat('babymaker', uniqueString(resourceGroup().id))]",
+            "metadata": {
+                "description": "Name of the storage account (must be globally unique)"
+            },
+            "minLength": 3,
+            "maxLength": 24
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for the storage account"
+            }
+        },
+        "storageAccountTier": {
+            "type": "string",
+            "defaultValue": "Standard",
+            "allowedValues": [
+                "Standard",
+                "Premium"
+            ],
+            "metadata": {
+                "description": "Storage account tier"
+            }
+        },
+        "storageAccountReplication": {
+            "type": "string",
+            "defaultValue": "LRS",
+            "allowedValues": [
+                "LRS",
+                "GRS",
+                "RAGRS",
+                "ZRS"
+            ],
+            "metadata": {
+                "description": "Storage account replication type"
+            }
+        },
+        "enableHttpsOnly": {
+            "type": "bool",
+            "defaultValue": true,
+            "metadata": {
+                "description": "Enable HTTPS-only traffic"
+            }
+        },
+        "allowBlobPublicAccess": {
+            "type": "bool",
+            "defaultValue": false,
+            "metadata": {
+                "description": "Allow blob public access (recommended: false for security)"
+            }
+        }
+    },
+    "variables": {
+        "storageAccountName": "[toLower(parameters('storageAccountName'))]",
+        "containerNames": [
+            "parent-photos",
+            "generated-babies",
+            "generated-families",
+            "temp-uploads"
+        ]
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2023-01-01",
+            "name": "[variables('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "tags": {
+                "Application": "Baby Maker 5000",
+                "Environment": "Production",
+                "Purpose": "Image Storage"
+            },
+            "sku": {
+                "name": "[concat(parameters('storageAccountTier'), '_', parameters('storageAccountReplication'))]"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "dnsEndpointType": "Standard",
+                "defaultToOAuthAuthentication": false,
+                "publicNetworkAccess": "Enabled",
+                "allowCrossTenantReplication": false,
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": "[parameters('allowBlobPublicAccess')]",
+                "allowSharedKeyAccess": true,
+                "supportsHttpsTrafficOnly": "[parameters('enableHttpsOnly')]",
+                "encryption": {
+                    "requireInfrastructureEncryption": false,
+                    "services": {
+                        "file": {
+                            "keyType": "Account",
+                            "enabled": true
+                        },
+                        "blob": {
+                            "keyType": "Account",
+                            "enabled": true
+                        }
+                    },
+                    "keySource": "Microsoft.Storage"
+                },
+                "accessTier": "Hot",
+                "networkAcls": {
+                    "bypass": "AzureServices",
+                    "virtualNetworkRules": [],
+                    "ipRules": [],
+                    "defaultAction": "Allow"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices",
+            "apiVersion": "2023-01-01",
+            "name": "[concat(variables('storageAccountName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "properties": {
+                "changeFeed": {
+                    "enabled": false
+                },
+                "restorePolicy": {
+                    "enabled": false
+                },
+                "containerDeleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 7
+                },
+                "cors": {
+                    "corsRules": [
+                        {
+                            "allowedOrigins": [
+                                "*"
+                            ],
+                            "allowedMethods": [
+                                "GET",
+                                "HEAD",
+                                "POST",
+                                "PUT"
+                            ],
+                            "maxAgeInSeconds": 3600,
+                            "exposedHeaders": [
+                                "*"
+                            ],
+                            "allowedHeaders": [
+                                "*"
+                            ]
+                        }
+                    ]
+                },
+                "deleteRetentionPolicy": {
+                    "allowPermanentDelete": false,
+                    "enabled": true,
+                    "days": 7
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2023-01-01",
+            "name": "[concat(variables('storageAccountName'), '/default/', variables('containerNames')[copyIndex()])]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
+            ],
+            "copy": {
+                "name": "containerLoop",
+                "count": "[length(variables('containerNames'))]"
+            },
+            "properties": {
+                "immutableStorageWithVersioning": {
+                    "enabled": false
+                },
+                "defaultEncryptionScope": "$account-encryption-key",
+                "denyEncryptionScopeOverride": false,
+                "publicAccess": "None"
+            }
+        }
+    ],
+    "outputs": {
+        "storageAccountName": {
+            "type": "string",
+            "value": "[variables('storageAccountName')]"
+        },
+        "storageAccountId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+        },
+        "primaryEndpoints": {
+            "type": "object",
+            "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints]"
+        },
+        "connectionString": {
+            "type": "string",
+            "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').keys[0].value, ';EndpointSuffix=core.windows.net')]"
+        },
+        "containers": {
+            "type": "array",
+            "value": "[variables('containerNames')]"
+        },
+        "blobEndpoint": {
+            "type": "string",
+            "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.blob]"
+        }
+    }
+} 
