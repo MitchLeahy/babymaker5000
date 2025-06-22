@@ -39,15 +39,15 @@ jobs:
 
       - name: Prepare deployment package
         run: |
-          # Create a clean deployment directory
-          mkdir -p deployment
-          # Copy application files (exclude unnecessary files)
-          cp -r . deployment/
-          cd deployment
-          # Remove unnecessary files and directories
-          rm -rf .git .github venv __pycache__ .pytest_cache .env.example
-          find . -name "*.pyc" -delete
-          find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          # Create a temporary directory for deployment
+          mkdir -p /tmp/deployment
+          # Copy all files except excluded ones
+          rsync -av --exclude='.git' --exclude='.github' --exclude='venv' --exclude='__pycache__' --exclude='.pytest_cache' --exclude='.env.example' --exclude='deployment' . /tmp/deployment/
+          # Clean up any remaining Python cache files
+          find /tmp/deployment -name "*.pyc" -delete
+          find /tmp/deployment -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          # Move to our workspace
+          mv /tmp/deployment ./deployment
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
