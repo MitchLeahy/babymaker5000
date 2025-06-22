@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.production
+.env.azure
+.env.appservice
 
 # Database
 *.db

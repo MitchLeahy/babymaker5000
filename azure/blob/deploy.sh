@@ -82,7 +82,7 @@ GENERATED_FAMILIES_ENDPOINT=$(echo "$BLOB_DEPLOYMENT" | jq -r '.properties.outpu
 
 # Create .env configuration
 echo -e "${YELLOW}📝 Creating .env configuration...${NC}"
-cat > "../.env.azure" << EOF
+cat > "../../.env.azure" << EOF
 # Azure Blob Storage Configuration for Baby Maker 5000
 # Generated on $(date)
 
